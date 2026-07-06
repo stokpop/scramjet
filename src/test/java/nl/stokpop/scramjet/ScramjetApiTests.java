@@ -43,6 +43,24 @@ class ScramjetApiTests {
     }
 
     @Test
+    void directMemoryGrowAndClear() {
+        assertThat(mockMvc.get().uri("/memory/direct/grow?buffers=2&size=8192")).hasStatusOk();
+        assertThat(mockMvc.get().uri("/memory/direct/clear"))
+                .hasStatusOk()
+                .bodyJson()
+                .hasPathSatisfying("$.message", m -> m.assertThat().isEqualTo("There are now 0 direct ByteBuffers, holding a total of 0 MB off-heap."));
+    }
+
+    @Test
+    void segmentMemoryGrowAndClear() {
+        assertThat(mockMvc.get().uri("/memory/segment/grow?segments=2&size=8192")).hasStatusOk();
+        assertThat(mockMvc.get().uri("/memory/segment/clear"))
+                .hasStatusOk()
+                .bodyJson()
+                .hasPathSatisfying("$.message", m -> m.assertThat().isEqualTo("There are now 0 memory segments, holding a total of 0 MB native memory."));
+    }
+
+    @Test
     void flakyNeverFailsWithZeroFlakiness() {
         assertThat(mockMvc.get().uri("/flaky?flakiness=0&maxRandomDelay=1")).hasStatusOk();
     }

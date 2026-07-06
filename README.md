@@ -33,6 +33,10 @@ and JSON response shape (`message`, `name`, `durationInMillis`).
 | `GET /memory/grow?objects=10&items=9&length=100` | Simulate a memory leak (objects are retained forever) |
 | `GET /memory/clear` | Clear the leak |
 | `GET /memory/churn?objects=181&duration=100` | High object churn to stress young-gen GC |
+| `GET /memory/direct/grow?buffers=10&size=1048576` | Off-heap leak via direct ByteBuffers (hits `-XX:MaxDirectMemorySize`) |
+| `GET /memory/direct/clear` | Drop the direct buffers (freed on GC) |
+| `GET /memory/segment/grow?segments=10&size=1048576` | Native leak via foreign memory segments (Arena), grows until malloc fails or the container is OOM-killed |
+| `GET /memory/segment/clear` | Close all arenas, native memory freed immediately |
 | `GET /flaky?flakiness=50&maxRandomDelay=-1` | Fails `flakiness` out of 100 calls |
 | `GET /parallel?primeDelayMillis=2&maxPrime=10000` | Prime sums on the common fork join pool |
 | `GET /serial-stream?primeDelayMillis=5&maxPrime=10000` | Same, single threaded |
@@ -46,6 +50,18 @@ and JSON response shape (`message`, `name`, `durationInMillis`).
 
 Not ported from afterburner (by design, to stay lean): database/mybatis endpoints, basket shop,
 file upload/download, tcp connect, resilience4j retry/circuit-breaker endpoints and spring-security.
+
+To see an off-heap OOM quickly, cap direct memory and grow:
+
+```shell
+java -Xmx256m -XX:MaxDirectMemorySize=128m -jar target/scramjet-*.jar
+# then repeat: curl "localhost:8080/memory/direct/grow?buffers=16&size=1048576"
+# heap stays healthy; after ~128 MB: OutOfMemoryError: Direct buffer memory
+```
+
+`/memory/segment/grow` ignores `MaxDirectMemorySize` and keeps allocating native
+memory until malloc fails or the OS/container kills the process — the classic
+"RSS grows but heap looks fine" incident.
 
 ## Metrics over OTLP
 
