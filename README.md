@@ -7,6 +7,11 @@ with metrics exported over OTLP.
 Use it as a target application for load tests: it can burn CPU, hog or churn memory, hold locks,
 sleep, log abundantly, fail on demand and fan out remote calls — all tunable per request.
 
+## Modules
+
+* `scramjet-service` — the Spring Boot service
+* `scramjet-loadgen` — a minimal load generator, plain Java with virtual threads, no dependencies
+
 ## Requirements
 
 * Java 25
@@ -14,7 +19,7 @@ sleep, log abundantly, fail on demand and fan out remote calls — all tunable p
 ## Run
 
 ```shell
-./mvnw spring-boot:run
+./mvnw -pl scramjet-service spring-boot:run
 ```
 
 The service listens on port 8080. API documentation (OpenAPI via springdoc) is served at
@@ -54,7 +59,7 @@ file upload/download, tcp connect, resilience4j retry/circuit-breaker endpoints 
 To see an off-heap OOM quickly, cap direct memory and grow:
 
 ```shell
-java -Xmx256m -XX:MaxDirectMemorySize=128m -jar target/scramjet-*.jar
+java -Xmx256m -XX:MaxDirectMemorySize=128m -jar scramjet-service/target/scramjet-service-*.jar
 # then repeat: curl "localhost:8080/memory/direct/grow?buffers=16&size=1048576"
 # heap stays healthy; after ~128 MB: OutOfMemoryError: Direct buffer memory
 ```
@@ -94,6 +99,33 @@ docker run --rm -p 4318:4318 otel/opentelemetry-collector
 | `scramjet.delay-call-limit` | `10` | Max concurrent `/delay-limited` calls |
 | `scramjet.remote-call-base-url` | `http://localhost:8080` | Base url for `/remote/call*` |
 | `spring.threads.virtual.enabled` | `false` | Serve requests on virtual threads |
+
+## Load generator
+
+Open-loop load: requests start at a fixed rate on virtual threads, whatever the response
+times, so a slow service builds up concurrency instead of quietly getting less load.
+The scenario alternates `/delay` and `/cpu/magic-identity-check` calls.
+
+```shell
+./mvnw -pl scramjet-loadgen package
+java -jar scramjet-loadgen/target/scramjet-loadgen.jar --url http://localhost:8080 --duration 30s --rate 20
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--url` | `http://localhost:8080` | Base url of the service |
+| `--duration` | `30s` | How long to run: `30s`, `2m`, `PT1M` or plain seconds |
+| `--rate` | `10` | Requests started per second |
+| `--timeout` | `10s` | Per request timeout |
+| `--delay-ms` | `100` | `duration` param for `/delay` |
+| `--matrix-size` | `100` | `matrixSize` param for `/cpu/magic-identity-check` |
+| `--insecure` | off | Skip TLS certificate and host name verification, for test environments with self-signed certificates only |
+
+At the end it reports per step the total, successes, failures, error percentage, throughput
+and response times (min, p50, p90, p95, p99, max) in milliseconds, plus a breakdown of
+failure reasons (HTTP status or exception). Response times are measured from the
+*scheduled* start of each request, so they include any time a request had to wait to be
+sent (no coordinated omission).
 
 ## Build
 
