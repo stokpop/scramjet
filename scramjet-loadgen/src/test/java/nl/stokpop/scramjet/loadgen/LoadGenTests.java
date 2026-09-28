@@ -47,6 +47,22 @@ class LoadGenTests {
     }
 
     @Test
+    void scenarios() {
+        assertEquals(List.of("delay", "matrix"), stepNames(Options.parse()));
+        assertEquals(List.of("churn", "delay"), stepNames(Options.parse("--scenario", "churn")));
+        assertEquals(List.of("leak", "delay"), stepNames(Options.parse("--scenario", "LEAK")));
+        assertEquals("/memory/grow?objects=1&length=100&items=3",
+                LoadGen.scenario(Options.parse("--scenario", "leak", "--leak-items", "3")).getFirst().path());
+        assertEquals("/memory/churn?duration=0&objects=500",
+                LoadGen.scenario(Options.parse("--scenario", "churn", "--churn-objects", "500")).getFirst().path());
+        assertThrows(IllegalArgumentException.class, () -> Options.parse("--scenario", "boom"));
+    }
+
+    private static List<String> stepNames(Options options) {
+        return LoadGen.scenario(options).stream().map(LoadGen.Step::name).toList();
+    }
+
+    @Test
     void rejectsBadRate() {
         assertThrows(IllegalArgumentException.class, () -> Options.parse("--rate", "0"));
         assertThrows(IllegalArgumentException.class, () -> Options.parse("--rate"));

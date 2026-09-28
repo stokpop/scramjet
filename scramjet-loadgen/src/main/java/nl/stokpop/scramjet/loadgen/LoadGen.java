@@ -45,12 +45,23 @@ public final class LoadGen {
             return;
         }
 
-        List<Step> scenario = List.of(
-                new Step("delay", "/delay?duration=" + options.delayMillis()),
-                new Step("matrix", "/cpu/magic-identity-check?matrixSize=" + options.matrixSize()));
-
-        Results results = run(options, scenario);
+        Results results = run(options, scenario(options));
         System.out.println(results.report());
+    }
+
+    static List<Step> scenario(Options options) {
+        Step delay = new Step("delay", "/delay?duration=" + options.delayMillis());
+        return switch (options.scenario()) {
+            case "churn" -> List.of(
+                    new Step("churn", "/memory/churn?duration=0&objects=" + options.churnObjects()),
+                    delay);
+            case "leak" -> List.of(
+                    new Step("leak", "/memory/grow?objects=1&length=100&items=" + options.leakItems()),
+                    delay);
+            default -> List.of(
+                    delay,
+                    new Step("matrix", "/cpu/magic-identity-check?matrixSize=" + options.matrixSize()));
+        };
     }
 
     static Results run(Options options, List<Step> scenario) {
@@ -68,8 +79,8 @@ public final class LoadGen {
         long totalRequests = Math.round(options.rate() * options.duration().toNanos() / 1e9);
         long intervalNanos = Math.round(1e9 / options.rate());
 
-        System.out.printf("Running %d requests at %.1f req/s for %s against %s%n",
-                totalRequests, options.rate(), options.duration(), options.baseUrl());
+        System.out.printf("Running %s scenario: %d requests at %.1f req/s for %s against %s%n",
+                options.scenario(), totalRequests, options.rate(), options.duration(), options.baseUrl());
 
         Results results = new Results(scenario.stream().map(Step::name).toList());
 

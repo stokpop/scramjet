@@ -30,31 +30,43 @@ The service listens on port 8080. API documentation (OpenAPI via springdoc) is s
 The HTTP API is compatible with the afterburner core endpoints: same paths, request parameters
 and JSON response shape (`message`, `name`, `durationInMillis`).
 
+Not ported from afterburner (by design, to stay lean): database/mybatis endpoints, basket shop,
+file upload/download, tcp connect, resilience4j retry/circuit-breaker endpoints and spring-security.
+
+### Latency and contention
+
 | Endpoint | What it does |
 |---|---|
 | `GET /delay?duration=100` | Sleep in the request thread (millis or ISO-8601, e.g. `PT0.5S`) |
 | `GET /delay-limited?duration=100` | Same, but concurrency-limited by a semaphore (`scramjet.delay-call-limit`); rejects with 503 when exhausted |
+| `GET /mind-my-business?duration=5` | Sleep with start/end log lines |
+| `GET /one-lock?duration=100` | All requests contend on one lock |
+
+### CPU and thread pools
+
+| Endpoint | What it does |
+|---|---|
 | `GET /cpu/magic-identity-check?matrixSize=10` | Burn CPU with matrix multiplication |
-| `GET /memory/grow?objects=10&items=9&length=100` | Simulate a memory leak (objects are retained forever) |
+| `GET /parallel?primeDelayMillis=2&maxPrime=10000` | Prime sums on the common fork join pool |
+| `GET /serial-stream?primeDelayMillis=5&maxPrime=10000` | Same, single threaded |
+| `GET /parallel-info` | Common fork join pool stats |
+
+### Heap memory
+
+| Endpoint | What it does |
+|---|---|
+| `GET /memory/churn?objects=181&duration=100` | High object churn: short-lived objects that stress young-gen GC |
+| `GET /memory/grow?objects=10&items=9&length=100` | Memory leak: objects are retained forever (~1.8 KB per item) |
 | `GET /memory/clear` | Clear the leak |
-| `GET /memory/churn?objects=181&duration=100` | High object churn to stress young-gen GC |
+
+### Off-heap memory
+
+| Endpoint | What it does |
+|---|---|
 | `GET /memory/direct/grow?buffers=10&size=1048576` | Off-heap leak via direct ByteBuffers (hits `-XX:MaxDirectMemorySize`) |
 | `GET /memory/direct/clear` | Drop the direct buffers (freed on GC) |
 | `GET /memory/segment/grow?segments=10&size=1048576` | Native leak via foreign memory segments (Arena), grows until malloc fails or the container is OOM-killed |
 | `GET /memory/segment/clear` | Close all arenas, native memory freed immediately |
-| `GET /flaky?flakiness=50&maxRandomDelay=-1` | Fails `flakiness` out of 100 calls |
-| `GET /parallel?primeDelayMillis=2&maxPrime=10000` | Prime sums on the common fork join pool |
-| `GET /serial-stream?primeDelayMillis=5&maxPrime=10000` | Same, single threaded |
-| `GET /parallel-info` | Common fork join pool stats |
-| `GET /one-lock?duration=100` | All requests contend on one lock |
-| `GET /log-some?logLines=10&logSize=1000` | Log a lot (also `POST` with a body) |
-| `GET /mind-my-business?duration=5` | Sleep with start/end log lines |
-| `GET /system-info` | JVM memory, processors and threads |
-| `GET /remote/call?path=/delay` | Call a downstream service (itself by default) |
-| `GET /remote/call-many?path=/delay?duration=33&count=3` | Parallel downstream calls on virtual threads |
-
-Not ported from afterburner (by design, to stay lean): database/mybatis endpoints, basket shop,
-file upload/download, tcp connect, resilience4j retry/circuit-breaker endpoints and spring-security.
 
 To see an off-heap OOM quickly, cap direct memory and grow:
 
@@ -67,6 +79,26 @@ java -Xmx256m -XX:MaxDirectMemorySize=128m -jar scramjet-service/target/scramjet
 `/memory/segment/grow` ignores `MaxDirectMemorySize` and keeps allocating native
 memory until malloc fails or the OS/container kills the process — the classic
 "RSS grows but heap looks fine" incident.
+
+### Errors and logging
+
+| Endpoint | What it does |
+|---|---|
+| `GET /flaky?flakiness=50&maxRandomDelay=-1` | Fails `flakiness` out of 100 calls |
+| `GET /log-some?logLines=10&logSize=1000` | Log a lot (also `POST` with a body) |
+
+### Remote calls
+
+| Endpoint | What it does |
+|---|---|
+| `GET /remote/call?path=/delay` | Call a downstream service (itself by default) |
+| `GET /remote/call-many?path=/delay?duration=33&count=3` | Parallel downstream calls on virtual threads |
+
+### Info
+
+| Endpoint | What it does |
+|---|---|
+| `GET /system-info` | JVM memory, processors and threads |
 
 ## Metrics over OTLP
 
@@ -105,12 +137,25 @@ docker run --rm -p 4318:4318 otel/opentelemetry-collector
 
 Open-loop load: requests start at a fixed rate on virtual threads, whatever the response
 times, so a slow service builds up concurrency instead of quietly getting less load.
-The scenario alternates `/delay` and `/cpu/magic-identity-check` calls.
 
 ```shell
 ./mvnw -pl scramjet-loadgen package
 java -jar scramjet-loadgen/target/scramjet-loadgen.jar --url http://localhost:8080 --duration 30s --rate 20
 ```
+
+Each scenario alternates two calls. The churn and leak scenarios pair their memory call
+with `/delay`, so growing GC pressure shows up in the response times of otherwise cheap
+requests.
+
+| Scenario | Calls | What to expect |
+|---|---|---|
+| `basic` | `/delay`, `/cpu/magic-identity-check` | Steady latency and CPU load |
+| `churn` | `/memory/churn`, `/delay` | High allocation rate, frequent young-gen GCs, heap stays flat |
+| `leak` | `/memory/grow`, `/delay` | Heap fills up, GC works harder and harder, then timeouts and `OutOfMemoryError` |
+
+With defaults the leak retains ~176 KB per leak call. Against a service started with
+`-Xmx256m`, `--scenario leak --rate 20` runs into `OutOfMemoryError` after about two
+minutes; lower `--rate` or `--leak-items` for a slower leak. `/memory/clear` releases it.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -118,8 +163,11 @@ java -jar scramjet-loadgen/target/scramjet-loadgen.jar --url http://localhost:80
 | `--duration` | `30s` | How long to run: `30s`, `2m`, `PT1M` or plain seconds |
 | `--rate` | `10` | Requests started per second |
 | `--timeout` | `10s` | Per request timeout |
+| `--scenario` | `basic` | `basic`, `churn` or `leak` |
 | `--delay-ms` | `100` | `duration` param for `/delay` |
 | `--matrix-size` | `100` | `matrixSize` param for `/cpu/magic-identity-check` |
+| `--churn-objects` | `100000` | Short-lived BigDecimals created per `/memory/churn` call |
+| `--leak-items` | `100` | Music scores (~1.8 KB each) retained per `/memory/grow` call |
 | `--insecure` | off | Skip TLS certificate and host name verification, for test environments with self-signed certificates only |
 
 At the end it reports per step the total, successes, failures, error percentage, throughput

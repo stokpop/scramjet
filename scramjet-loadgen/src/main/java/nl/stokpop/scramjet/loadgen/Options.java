@@ -2,6 +2,7 @@ package nl.stokpop.scramjet.loadgen;
 
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.Locale;
 
 record Options(
@@ -9,10 +10,15 @@ record Options(
         Duration duration,
         double rate,
         Duration timeout,
+        String scenario,
         int delayMillis,
         int matrixSize,
+        int churnObjects,
+        int leakItems,
         boolean insecure,
         boolean help) {
+
+    static final List<String> SCENARIOS = List.of("basic", "churn", "leak");
 
     static final String USAGE = """
             Usage: java -jar scramjet-loadgen.jar [options]
@@ -21,20 +27,30 @@ record Options(
               --duration <duration>   how long to generate load: 30s, 2m, PT1M or plain seconds, default 30s
               --rate <req/s>          requests started per second, default 10
               --timeout <duration>    per request timeout, default 10s
+              --scenario <name>       basic, churn or leak, default basic
               --delay-ms <millis>     duration param for /delay calls, default 100
               --matrix-size <n>       matrixSize param for /cpu/magic-identity-check calls, default 100
+              --churn-objects <n>     short-lived BigDecimals created per /memory/churn call, default 100000
+              --leak-items <n>        music scores retained per /memory/grow call (~1.8 KB each), default 100
               --insecure              skip TLS certificate and host name verification (test environments only)
               --help                  show this help
 
-            Scenario: alternates /delay and /cpu/magic-identity-check calls.""";
+            Scenarios, each alternating its calls:
+              basic  /delay and /cpu/magic-identity-check
+              churn  /memory/churn (high allocation rate, garbage right away) and /delay
+              leak   /memory/grow (retained forever, heap grows until OutOfMemoryError) and /delay
+            The /delay calls show how growing GC pressure hurts otherwise cheap requests.""";
 
     static Options parse(String... args) {
         String baseUrl = "http://localhost:8080";
         Duration duration = Duration.ofSeconds(30);
         double rate = 10;
         Duration timeout = Duration.ofSeconds(10);
+        String scenario = "basic";
         int delayMillis = 100;
         int matrixSize = 100;
+        int churnObjects = 100_000;
+        int leakItems = 100;
         boolean insecure = false;
         boolean help = false;
 
@@ -57,12 +73,23 @@ record Options(
                 case "--duration" -> duration = parseDuration(value);
                 case "--rate" -> rate = parsePositiveDouble(arg, value);
                 case "--timeout" -> timeout = parseDuration(value);
+                case "--scenario" -> scenario = parseScenario(value);
                 case "--delay-ms" -> delayMillis = (int) parsePositiveDouble(arg, value);
                 case "--matrix-size" -> matrixSize = (int) parsePositiveDouble(arg, value);
+                case "--churn-objects" -> churnObjects = (int) parsePositiveDouble(arg, value);
+                case "--leak-items" -> leakItems = (int) parsePositiveDouble(arg, value);
                 default -> throw new IllegalArgumentException("Unknown option " + arg);
             }
         }
-        return new Options(baseUrl, duration, rate, timeout, delayMillis, matrixSize, insecure, help);
+        return new Options(baseUrl, duration, rate, timeout, scenario, delayMillis, matrixSize, churnObjects, leakItems, insecure, help);
+    }
+
+    private static String parseScenario(String value) {
+        String scenario = value.toLowerCase(Locale.ROOT);
+        if (!SCENARIOS.contains(scenario)) {
+            throw new IllegalArgumentException("Unknown scenario " + value + ", choose one of " + SCENARIOS);
+        }
+        return scenario;
     }
 
     static Duration parseDuration(String value) {
