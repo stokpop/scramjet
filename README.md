@@ -71,19 +71,20 @@ memory until malloc fails or the OS/container kills the process — the classic
 ## Metrics over OTLP
 
 Metrics are exported with Micrometer's OTLP registry to an OpenTelemetry collector,
-by default `http://localhost:4318/v1/metrics` every 10 seconds, including
-`http.server.requests` latency histograms and JVM metrics, tagged with
-`service.name=scramjet`.
+every 10 seconds, including `http.server.requests` latency histograms and JVM metrics,
+tagged with `service.name=scramjet`.
 
-Configure via `application.properties` or environment:
+Export is **off by default**, so running without a collector gives no log noise.
+Switch it on with `OTLP_ENABLED=true`; the default target is `http://localhost:4318/v1/metrics`:
 
-```properties
-management.otlp.metrics.export.url=http://collector:4318/v1/metrics
-management.otlp.metrics.export.step=10s
+```shell
+OTLP_ENABLED=true ./mvnw -pl scramjet-service spring-boot:run
+OTLP_ENABLED=true MANAGEMENT_OTLP_METRICS_EXPORT_URL=http://collector:4318/v1/metrics java -jar scramjet-service/target/scramjet-service-*.jar
 ```
 
-Disable export (e.g. locally without a collector) with
-`management.otlp.metrics.export.enabled=false`.
+At startup a log line states whether export is on and where it sends to. Once enabled, an
+unreachable collector is logged as a one-line warning (no stacktrace) on every export, on
+purpose: metrics should not go missing silently during a load test.
 
 A quick local collector to see the metrics flow:
 
