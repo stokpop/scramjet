@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compare scramjet-service by default, with MALLOC_ARENA_MAX=2 and with -XX:TrimNativeHeapInterval=5000:
+# Compare scramjet-service by default, with MALLOC_ARENA_MAX=2, with -XX:TrimNativeHeapInterval=5000 and with both:
 # native memory retention, fragmentation and malloc lock contention.
 # Usage: experiments/malloc-arena-max/run.sh [phase seconds, default 60]
 # Needs: Linux with glibc, Java 25 (java, jcmd, jfr on PATH), python3, curl, a built project (./mvnw package), port 8080 free.
@@ -118,10 +118,11 @@ run() {
   SERVICE_PID=""
 }
 
-RUNS=(default arena-max-2 trim-5s)
+RUNS=(default arena-max-2 trim-5s arena-max-2-trim-5s)
 run default X=1
 run arena-max-2 MALLOC_ARENA_MAX=2
 run trim-5s X=1 -XX:TrimNativeHeapInterval=5000
+run arena-max-2-trim-5s MALLOC_ARENA_MAX=2 -XX:TrimNativeHeapInterval=5000
 
 echo "== JFR: RSS and NMT over time (before the final trim) =="
 for NAME in "${RUNS[@]}"; do
@@ -131,7 +132,7 @@ events = json.load(sys.stdin)['recording']['events']
 rss = [e['values']['size'] for e in events if e['type'] == 'jdk.ResidentSetSize']
 nmt = [e['values']['committed'] for e in events if e['type'] == 'jdk.NativeMemoryUsageTotal']
 mb = lambda b: int(b / 2**20)
-print('  %-12s RSS peak %4d MB, end %4d MB | NMT peak %4d MB, end %4d MB | end gap %4d MB'
+print('  %-20s RSS peak %4d MB, end %4d MB | NMT peak %4d MB, end %4d MB | end gap %4d MB'
       % ('$NAME', mb(max(rss)), mb(rss[-1]), mb(max(nmt)), mb(nmt[-1]), mb(rss[-1] - nmt[-1])))"
 done
 echo "== JFR method timing (JEP 520), whole run =="
