@@ -57,6 +57,10 @@ public final class LoadGen {
             case "leak" -> List.of(
                     new Step("leak", "/memory/grow?objects=1&length=100&items=" + options.leakItems()),
                     delay);
+            case "native" -> List.of(
+                    new Step("native", "/memory/native/churn?segments=" + options.nativeSegments()
+                            + "&size=" + options.nativeKb() * 1024 + "&duration=" + options.delayMillis()),
+                    delay);
             default -> List.of(
                     delay,
                     new Step("matrix", "/cpu/magic-identity-check?matrixSize=" + options.matrixSize()));

@@ -67,6 +67,7 @@ file upload/download, tcp connect, resilience4j retry/circuit-breaker endpoints 
 | `GET /memory/direct/clear` | Drop the direct buffers (freed on GC) |
 | `GET /memory/segment/grow?segments=10&size=1048576` | Native leak via foreign memory segments (Arena), grows until malloc fails or the container is OOM-killed |
 | `GET /memory/segment/clear` | Close all arenas, native memory freed immediately |
+| `GET /memory/native/churn?segments=20&size=65536&duration=100` | Native churn: malloc segments, hold them for `duration`, free them, all within the request |
 
 To see an off-heap OOM quickly, cap direct memory and grow:
 
@@ -99,6 +100,12 @@ memory until malloc fails or the OS/container kills the process — the classic
 | Endpoint | What it does |
 |---|---|
 | `GET /system-info` | JVM memory, processors and threads |
+
+## Experiments
+
+* [MALLOC_ARENA_MAX and TrimNativeHeapInterval](experiments/malloc-arena-max/README.md): effect of
+  `MALLOC_ARENA_MAX=2` and `-XX:TrimNativeHeapInterval` on native memory retention, fragmentation and
+  malloc lock contention, measured with NMT, JFR, `malloc_info`, `malloc_trim` and `/proc`.
 
 ## Metrics over OTLP
 
@@ -152,6 +159,7 @@ requests.
 | `basic` | `/delay`, `/cpu/magic-identity-check` | Steady latency and CPU load |
 | `churn` | `/memory/churn`, `/delay` | High allocation rate, frequent young-gen GCs, heap stays flat |
 | `leak` | `/memory/grow`, `/delay` | Heap fills up, GC works harder and harder, then timeouts and `OutOfMemoryError` |
+| `native` | `/memory/native/churn`, `/delay` | Native malloc/free on many request threads: glibc malloc arenas, RSS above what the JVM tracks |
 
 With defaults the leak retains ~176 KB per leak call. Against a service started with
 `-Xmx256m`, `--scenario leak --rate 20` runs into `OutOfMemoryError` after about two
@@ -163,11 +171,13 @@ minutes; lower `--rate` or `--leak-items` for a slower leak. `/memory/clear` rel
 | `--duration` | `30s` | How long to run: `30s`, `2m`, `PT1M` or plain seconds |
 | `--rate` | `10` | Requests started per second |
 | `--timeout` | `10s` | Per request timeout |
-| `--scenario` | `basic` | `basic`, `churn` or `leak` |
+| `--scenario` | `basic` | `basic`, `churn`, `leak` or `native` |
 | `--delay-ms` | `100` | `duration` param for `/delay` |
 | `--matrix-size` | `100` | `matrixSize` param for `/cpu/magic-identity-check` |
 | `--churn-objects` | `100000` | Short-lived BigDecimals created per `/memory/churn` call |
 | `--leak-items` | `100` | Music scores (~1.8 KB each) retained per `/memory/grow` call |
+| `--native-segments` | `20` | Native segments malloc'ed per `/memory/native/churn` call |
+| `--native-kb` | `64` | Size per native segment; keep it below glibc's 128 KB mmap threshold to hit the malloc arenas |
 | `--report` | `ascii` | `ascii`: report at the end; `live`: also a row per tick during the run |
 | `--insecure` | off | Skip TLS certificate and host name verification, for test environments with self-signed certificates only |
 

@@ -3,6 +3,7 @@ package nl.stokpop.scramjet.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import nl.stokpop.scramjet.ScramjetProperties;
 import nl.stokpop.scramjet.domain.BurnerMessage;
+import nl.stokpop.scramjet.util.Sleeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -118,6 +119,26 @@ public class OffHeapMemory {
         segmentBytes.set(0);
         long durationMillis = System.currentTimeMillis() - startTime;
         return new BurnerMessage(createSegmentMessage(), props.name(), durationMillis);
+    }
+
+    @Operation(summary = "Native memory churn: allocate segments with malloc, hold them for 'duration', then free them. "
+            + "Concurrent calls on many threads make glibc create malloc arenas; see MALLOC_ARENA_MAX.")
+    @GetMapping("/memory/native/churn")
+    public BurnerMessage nativeChurn(
+            @RequestParam(value = "segments", defaultValue = "20") int segments,
+            @RequestParam(value = "size", defaultValue = "65536") long size,
+            @RequestParam(value = "duration", defaultValue = "100") String duration) {
+
+        long startTime = System.currentTimeMillis();
+        try (Arena arena = Arena.ofConfined()) {
+            for (int i = 0; i < segments; i++) {
+                touchPages(arena.allocate(size), size);
+            }
+            Sleeper.sleep(duration);
+        }
+        long durationMillis = System.currentTimeMillis() - startTime;
+        return new BurnerMessage("Allocated and freed %d native segments of %d bytes.".formatted(segments, size),
+                props.name(), durationMillis);
     }
 
     private static void touchPages(ByteBuffer buffer) {

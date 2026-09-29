@@ -19,6 +19,7 @@ class LoadGenTests {
         assertEquals(List.of("delay", "matrix"), stepNames(Options.parse()));
         assertEquals(List.of("churn", "delay"), stepNames(Options.parse("--scenario", "churn")));
         assertEquals(List.of("leak", "delay"), stepNames(Options.parse("--scenario", "leak")));
+        assertEquals(List.of("native", "delay"), stepNames(Options.parse("--scenario", "native")));
     }
 
     @Test
@@ -27,6 +28,8 @@ class LoadGenTests {
                 LoadGen.scenario(Options.parse("--scenario", "leak", "--leak-items", "3")).getFirst().path());
         assertEquals("/memory/churn?duration=0&objects=500",
                 LoadGen.scenario(Options.parse("--scenario", "churn", "--churn-objects", "500")).getFirst().path());
+        assertEquals("/memory/native/churn?segments=5&size=32768&duration=50",
+                LoadGen.scenario(Options.builder().scenario("native").nativeSegments(5).nativeKb(32).delayMillis(50).build()).getFirst().path());
         assertEquals("/delay?duration=7",
                 LoadGen.scenario(Options.parse("--delay-ms", "7")).getFirst().path());
     }

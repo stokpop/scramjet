@@ -15,11 +15,13 @@ record Options(
         int matrixSize,
         int churnObjects,
         int leakItems,
+        int nativeSegments,
+        int nativeKb,
         String report,
         boolean insecure,
         boolean help) {
 
-    static final List<String> SCENARIOS = List.of("basic", "churn", "leak");
+    static final List<String> SCENARIOS = List.of("basic", "churn", "leak", "native");
 
     static final String USAGE = """
             Usage: java -jar scramjet-loadgen.jar [options]
@@ -28,11 +30,13 @@ record Options(
               --duration <duration>   how long to generate load: 30s, 2m, PT1M or plain seconds, default 30s
               --rate <req/s>          requests started per second, default 10
               --timeout <duration>    per request timeout, default 10s
-              --scenario <name>       basic, churn or leak, default basic
+              --scenario <name>       basic, churn, leak or native, default basic
               --delay-ms <millis>     duration param for /delay calls, default 100
               --matrix-size <n>       matrixSize param for /cpu/magic-identity-check calls, default 100
               --churn-objects <n>     short-lived BigDecimals created per /memory/churn call, default 100000
               --leak-items <n>        music scores retained per /memory/grow call (~1.8 KB each), default 100
+              --native-segments <n>   malloc'ed segments per /memory/native/churn call, default 20
+              --native-kb <n>         size of each native segment in KB, default 64 (below glibc's 128 KB mmap threshold)
               --report <name>         ascii (report at the end) or live (also a row per second during the run), default ascii
               --insecure              skip TLS certificate and host name verification (test environments only)
               --help                  show this help
@@ -41,6 +45,7 @@ record Options(
               basic  /delay and /cpu/magic-identity-check
               churn  /memory/churn (high allocation rate, garbage right away) and /delay
               leak   /memory/grow (retained forever, heap grows until OutOfMemoryError) and /delay
+              native /memory/native/churn (malloc, hold for --delay-ms, free) and /delay
             The /delay calls show how growing GC pressure hurts otherwise cheap requests.""";
 
     static Builder builder() {
@@ -69,10 +74,12 @@ record Options(
                 case "--rate" -> builder.rate(parsePositiveDouble(arg, value));
                 case "--timeout" -> builder.timeout(parseDuration(value));
                 case "--scenario" -> builder.scenario(parseChoice("scenario", value, SCENARIOS));
-                case "--delay-ms" -> builder.delayMillis((int) parsePositiveDouble(arg, value));
+                case "--delay-ms" -> builder.delayMillis(parseNonNegativeInt(arg, value));
                 case "--matrix-size" -> builder.matrixSize((int) parsePositiveDouble(arg, value));
                 case "--churn-objects" -> builder.churnObjects((int) parsePositiveDouble(arg, value));
                 case "--leak-items" -> builder.leakItems((int) parsePositiveDouble(arg, value));
+                case "--native-segments" -> builder.nativeSegments((int) parsePositiveDouble(arg, value));
+                case "--native-kb" -> builder.nativeKb((int) parsePositiveDouble(arg, value));
                 case "--report" -> builder.report(parseChoice("report", value, Report.NAMES));
                 default -> throw new IllegalArgumentException("Unknown option " + arg);
             }
@@ -90,6 +97,8 @@ record Options(
         private int matrixSize = 100;
         private int churnObjects = 100_000;
         private int leakItems = 100;
+        private int nativeSegments = 20;
+        private int nativeKb = 64;
         private String report = "ascii";
         private boolean insecure;
         private boolean help;
@@ -142,6 +151,16 @@ record Options(
             return this;
         }
 
+        Builder nativeSegments(int nativeSegments) {
+            this.nativeSegments = nativeSegments;
+            return this;
+        }
+
+        Builder nativeKb(int nativeKb) {
+            this.nativeKb = nativeKb;
+            return this;
+        }
+
         Builder report(String report) {
             this.report = report;
             return this;
@@ -162,6 +181,7 @@ record Options(
                 throw new IllegalArgumentException("rate must be positive: " + rate);
             }
             return new Options(baseUrl, duration, rate, timeout, scenario, delayMillis, matrixSize, churnObjects, leakItems,
+                    nativeSegments, nativeKb,
                     report, insecure, help);
         }
     }
@@ -195,6 +215,18 @@ record Options(
             return Duration.ofSeconds(Long.parseLong(v));
         } catch (NumberFormatException | DateTimeParseException e) {
             throw new IllegalArgumentException("Not a valid duration: " + value);
+        }
+    }
+
+    private static int parseNonNegativeInt(String option, String value) {
+        try {
+            int i = Integer.parseInt(value);
+            if (i < 0) {
+                throw new IllegalArgumentException(option + " must not be negative: " + value);
+            }
+            return i;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(option + " is not a whole number: " + value);
         }
     }
 

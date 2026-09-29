@@ -61,6 +61,14 @@ class ScramjetApiTests {
     }
 
     @Test
+    void nativeChurnAllocatesAndFrees() {
+        assertThat(mockMvc.get().uri("/memory/native/churn?segments=3&size=8192&duration=0"))
+                .hasStatusOk()
+                .bodyJson()
+                .hasPathSatisfying("$.message", m -> m.assertThat().isEqualTo("Allocated and freed 3 native segments of 8192 bytes."));
+    }
+
+    @Test
     void flakyNeverFailsWithZeroFlakiness() {
         assertThat(mockMvc.get().uri("/flaky?flakiness=0&maxRandomDelay=1")).hasStatusOk();
     }

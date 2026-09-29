@@ -57,5 +57,11 @@ class OptionsTests {
         assertThrows(IllegalArgumentException.class, () -> Options.parse("--scenario", "boom"));
         assertThrows(IllegalArgumentException.class, () -> Options.parse("--report", "html"));
         assertThrows(IllegalArgumentException.class, () -> Options.parse("--bogus", "1"));
+        assertThrows(IllegalArgumentException.class, () -> Options.parse("--delay-ms", "-1"));
+    }
+
+    @Test
+    void zeroDelayMeansNoHold() {
+        assertEquals(0, Options.parse("--delay-ms", "0").delayMillis());
     }
 }
