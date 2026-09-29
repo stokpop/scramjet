@@ -45,8 +45,24 @@ public final class LoadGen {
             return;
         }
 
-        Results results = run(options, scenario(options));
+        List<Step> scenario = scenario(options);
+        Results results = run(options, scenario);
         System.out.println(results.report());
+        System.out.println(settings(options, scenario));
+    }
+
+    static String settings(Options options, List<Step> scenario) {
+        StringBuilder settings = new StringBuilder("Settings:%n".formatted());
+        settings.append("  %-10s %s%n".formatted("url", options.baseUrl()));
+        settings.append("  %-10s %s%n".formatted("scenario", options.scenario()));
+        settings.append("  %-10s %s%n".formatted("duration", options.duration()));
+        settings.append("  %-10s %s req/s%n".formatted("rate", options.rate()));
+        settings.append("  %-10s %s%n".formatted("timeout", options.timeout()));
+        if (options.insecure()) {
+            settings.append("  %-10s %s%n".formatted("tls", "insecure, no certificate or host name verification"));
+        }
+        scenario.forEach(step -> settings.append("  %-10s %s%n".formatted(step.name(), step.path())));
+        return settings.toString();
     }
 
     static List<Step> scenario(Options options) {

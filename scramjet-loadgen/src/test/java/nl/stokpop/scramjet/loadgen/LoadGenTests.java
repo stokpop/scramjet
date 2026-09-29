@@ -58,6 +58,17 @@ class LoadGenTests {
         assertThrows(IllegalArgumentException.class, () -> Options.parse("--scenario", "boom"));
     }
 
+    @Test
+    void settingsShowUsedOptionsAndSteps() {
+        Options options = Options.parse("--scenario", "leak", "--rate", "5", "--leak-items", "7", "--duration", "1m");
+        String settings = LoadGen.settings(options, LoadGen.scenario(options));
+        assertTrue(settings.contains("scenario   leak"), settings);
+        assertTrue(settings.contains("rate       5.0 req/s"), settings);
+        assertTrue(settings.contains("duration   PT1M"), settings);
+        assertTrue(settings.contains("leak       /memory/grow?objects=1&length=100&items=7"), settings);
+        assertTrue(settings.contains("delay      /delay?duration=100"), settings);
+    }
+
     private static List<String> stepNames(Options options) {
         return LoadGen.scenario(options).stream().map(LoadGen.Step::name).toList();
     }
