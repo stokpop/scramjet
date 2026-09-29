@@ -45,24 +45,7 @@ public final class LoadGen {
             return;
         }
 
-        List<Step> scenario = scenario(options);
-        Results results = run(options, scenario);
-        System.out.println(results.report());
-        System.out.println(settings(options, scenario));
-    }
-
-    static String settings(Options options, List<Step> scenario) {
-        StringBuilder settings = new StringBuilder("Settings:%n".formatted());
-        settings.append("  %-10s %s%n".formatted("url", options.baseUrl()));
-        settings.append("  %-10s %s%n".formatted("scenario", options.scenario()));
-        settings.append("  %-10s %s%n".formatted("duration", options.duration()));
-        settings.append("  %-10s %s req/s%n".formatted("rate", options.rate()));
-        settings.append("  %-10s %s%n".formatted("timeout", options.timeout()));
-        if (options.insecure()) {
-            settings.append("  %-10s %s%n".formatted("tls", "insecure, no certificate or host name verification"));
-        }
-        scenario.forEach(step -> settings.append("  %-10s %s%n".formatted(step.name(), step.path())));
-        return settings.toString();
+        run(options, scenario(options), Report.forName(options.report()));
     }
 
     static List<Step> scenario(Options options) {
@@ -80,7 +63,7 @@ public final class LoadGen {
         };
     }
 
-    static Results run(Options options, List<Step> scenario) {
+    static Results run(Options options, List<Step> scenario, Report report) {
         HttpClient.Builder builder = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(5));
@@ -88,17 +71,15 @@ public final class LoadGen {
             // HttpClient has no builder option for this; the property must be set before the first client is built
             System.setProperty("jdk.internal.httpclient.disableHostnameVerification", "true");
             builder.sslContext(trustAllSslContext());
-            System.out.println("WARNING: --insecure: TLS certificates and host names are NOT verified");
         }
         HttpClient client = builder.build();
 
         long totalRequests = Math.round(options.rate() * options.duration().toNanos() / 1e9);
         long intervalNanos = Math.round(1e9 / options.rate());
 
-        System.out.printf("Running %s scenario: %d requests at %.1f req/s for %s against %s%n",
-                options.scenario(), totalRequests, options.rate(), options.duration(), options.baseUrl());
-
         Results results = new Results(scenario.stream().map(Step::name).toList());
+        results.addListener(report::sample);
+        report.started(options, scenario, totalRequests);
 
         long start = System.nanoTime();
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -110,29 +91,27 @@ public final class LoadGen {
                         .timeout(options.timeout())
                         .GET()
                         .build();
-                executor.submit(() -> call(client, request, step, scheduledStart, results));
+                long offset = scheduledStart - start;
+                executor.submit(() -> results.add(call(client, request, step, scheduledStart, offset)));
             }
         }
         results.finish(System.nanoTime() - start);
+        report.finished(options, scenario, results);
         return results;
     }
 
-    private static void call(HttpClient client, HttpRequest request, Step step, long scheduledStart, Results results) {
+    private static Sample call(HttpClient client, HttpRequest request, Step step, long scheduledStart, long offset) {
+        String failure;
         try {
-            HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
-            long responseTime = System.nanoTime() - scheduledStart;
-            int status = response.statusCode();
-            if (status >= 200 && status < 300) {
-                results.success(step.name(), responseTime);
-            } else {
-                results.failure(step.name(), responseTime, "HTTP " + status);
-            }
+            int status = client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+            failure = status >= 200 && status < 300 ? null : "HTTP " + status;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            results.failure(step.name(), System.nanoTime() - scheduledStart, e.getClass().getSimpleName());
+            failure = e.getClass().getSimpleName();
         } catch (Exception e) {
-            results.failure(step.name(), System.nanoTime() - scheduledStart, e.getClass().getSimpleName());
+            failure = e.getClass().getSimpleName();
         }
+        return new Sample(step.name(), offset, System.nanoTime() - scheduledStart, failure);
     }
 
     private static SSLContext trustAllSslContext() {

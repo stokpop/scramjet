@@ -168,6 +168,7 @@ minutes; lower `--rate` or `--leak-items` for a slower leak. `/memory/clear` rel
 | `--matrix-size` | `100` | `matrixSize` param for `/cpu/magic-identity-check` |
 | `--churn-objects` | `100000` | Short-lived BigDecimals created per `/memory/churn` call |
 | `--leak-items` | `100` | Music scores (~1.8 KB each) retained per `/memory/grow` call |
+| `--report` | `ascii` | Report view; only `ascii` so far |
 | `--insecure` | off | Skip TLS certificate and host name verification, for test environments with self-signed certificates only |
 
 At the end it reports per step the total, successes, failures, error percentage, throughput
@@ -175,6 +176,25 @@ and response times (min, p50, p90, p95, p99, max) in milliseconds, plus a breakd
 failure reasons (HTTP status or exception). Response times are measured from the
 *scheduled* start of each request, so they include any time a request had to wait to be
 sent (no coordinated omission).
+
+The report also charts response times over time, so hiccups and slow degradation stand
+out. Each row is an interval (whole seconds, at most 30 rows) with its p50, p95 and max as
+a bar on a log scale, and `!` marks intervals with errors. Here a leak run against a
+service with `-Xmx128m`: GC trouble shows at 54 s, the service stops answering at 63 s:
+
+```
+   time  reqs  err      p50      p95      max  1ms         10ms       100ms       1s
+    48s    60           7.5    103.7    107.5  ##########=============
+    51s    60           5.4    105.0    107.0  ########===============
+    54s    60          88.0    103.8    141.0  ######################=--
+    57s    60          81.7    104.2    133.7  ######################=-
+    60s    60          82.9    134.1    244.1  ######################==---
+    63s    60  55!   3000.6   3001.3   3004.1  ########################################>
+```
+
+The code follows a small MVC split: `Results` is the model (samples, with listeners for
+live updates), `Statistics` does the calculations, and a `Report` implementation is the
+view. `AsciiReport` is the only view for now; a live view can implement `Report.sample`.
 
 ## Build
 

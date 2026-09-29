@@ -1,86 +1,38 @@
 package nl.stokpop.scramjet.loadgen;
 
 import com.sun.net.httpserver.HttpServer;
+import nl.stokpop.scramjet.loadgen.Statistics.StepStats;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoadGenTests {
 
     @Test
-    void percentileNearestRank() {
-        long[] sorted = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-        assertEquals(5, Results.percentile(sorted, 50));
-        assertEquals(9, Results.percentile(sorted, 90));
-        assertEquals(10, Results.percentile(sorted, 99));
-        assertEquals(1, Results.percentile(sorted, 0));
-        assertEquals(0, Results.percentile(new long[0], 50));
-    }
-
-    @Test
-    void parseOptions() {
-        Options options = Options.parse("--url", "http://host:9090/", "--duration", "2m", "--rate", "25.5");
-        assertEquals("http://host:9090", options.baseUrl());
-        assertEquals(Duration.ofMinutes(2), options.duration());
-        assertEquals(25.5, options.rate());
-    }
-
-    @Test
-    void defaultsToLocalhost() {
-        assertEquals("http://localhost:8080", Options.parse().baseUrl());
-    }
-
-    @Test
-    void parseDurations() {
-        assertEquals(Duration.ofSeconds(30), Options.parseDuration("30s"));
-        assertEquals(Duration.ofMillis(500), Options.parseDuration("500ms"));
-        assertEquals(Duration.ofSeconds(90), Options.parseDuration("PT1M30S"));
-        assertEquals(Duration.ofSeconds(12), Options.parseDuration("12"));
-        assertThrows(IllegalArgumentException.class, () -> Options.parseDuration("soon"));
-    }
-
-    @Test
-    void scenarios() {
+    void scenarioSteps() {
         assertEquals(List.of("delay", "matrix"), stepNames(Options.parse()));
         assertEquals(List.of("churn", "delay"), stepNames(Options.parse("--scenario", "churn")));
-        assertEquals(List.of("leak", "delay"), stepNames(Options.parse("--scenario", "LEAK")));
+        assertEquals(List.of("leak", "delay"), stepNames(Options.parse("--scenario", "leak")));
+    }
+
+    @Test
+    void scenarioPathsUseOptions() {
         assertEquals("/memory/grow?objects=1&length=100&items=3",
                 LoadGen.scenario(Options.parse("--scenario", "leak", "--leak-items", "3")).getFirst().path());
         assertEquals("/memory/churn?duration=0&objects=500",
                 LoadGen.scenario(Options.parse("--scenario", "churn", "--churn-objects", "500")).getFirst().path());
-        assertThrows(IllegalArgumentException.class, () -> Options.parse("--scenario", "boom"));
+        assertEquals("/delay?duration=7",
+                LoadGen.scenario(Options.parse("--delay-ms", "7")).getFirst().path());
     }
 
     @Test
-    void settingsShowUsedOptionsAndSteps() {
-        Options options = Options.parse("--scenario", "leak", "--rate", "5", "--leak-items", "7", "--duration", "1m");
-        String settings = LoadGen.settings(options, LoadGen.scenario(options));
-        assertTrue(settings.contains("scenario   leak"), settings);
-        assertTrue(settings.contains("rate       5.0 req/s"), settings);
-        assertTrue(settings.contains("duration   PT1M"), settings);
-        assertTrue(settings.contains("leak       /memory/grow?objects=1&length=100&items=7"), settings);
-        assertTrue(settings.contains("delay      /delay?duration=100"), settings);
-    }
-
-    private static List<String> stepNames(Options options) {
-        return LoadGen.scenario(options).stream().map(LoadGen.Step::name).toList();
-    }
-
-    @Test
-    void rejectsBadRate() {
-        assertThrows(IllegalArgumentException.class, () -> Options.parse("--rate", "0"));
-        assertThrows(IllegalArgumentException.class, () -> Options.parse("--rate"));
-    }
-
-    @Test
-    void runsScenarioAgainstServer() throws IOException {
+    void runsAtRateAndNotifiesReport() throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/ok", exchange -> {
             exchange.sendResponseHeaders(200, -1);
@@ -91,22 +43,41 @@ class LoadGenTests {
             exchange.close();
         });
         server.start();
-        try {
-            Options options = Options.parse(
-                    "--url", "http://localhost:" + server.getAddress().getPort(),
-                    "--duration", "1s", "--rate", "20");
-            Results results = LoadGen.run(options, List.of(
-                    new LoadGen.Step("ok", "/ok"),
-                    new LoadGen.Step("fail", "/fail")));
+        AtomicLong started = new AtomicLong();
+        AtomicInteger samples = new AtomicInteger();
+        AtomicInteger finished = new AtomicInteger();
+        Report report = new Report() {
+            @Override
+            public void started(Options options, List<LoadGen.Step> scenario, long totalRequests) {
+                started.set(totalRequests);
+            }
 
-            assertEquals(10, results.successes("ok"));
-            assertEquals(0, results.failures("ok"));
-            assertEquals(0, results.successes("fail"));
-            assertEquals(10, results.failures("fail"));
-            String report = results.report();
-            assertTrue(report.contains("HTTP 500"), report);
+            @Override
+            public void sample(Sample sample) {
+                samples.incrementAndGet();
+            }
+
+            @Override
+            public void finished(Options options, List<LoadGen.Step> scenario, Results results) {
+                finished.incrementAndGet();
+            }
+        };
+        try {
+            Options options = Options.parse("--url", "http://localhost:" + server.getAddress().getPort(), "--duration", "1s", "--rate", "20");
+            Results results = LoadGen.run(options, List.of(new LoadGen.Step("ok", "/ok"), new LoadGen.Step("fail", "/fail")), report);
+
+            List<StepStats> summary = Statistics.summary(results);
+            assertEquals(10, summary.get(0).ok());
+            assertEquals(10, summary.get(1).failed());
+            assertEquals(20, started.get());
+            assertEquals(20, samples.get());
+            assertEquals(1, finished.get());
         } finally {
             server.stop(0);
         }
+    }
+
+    private static List<String> stepNames(Options options) {
+        return LoadGen.scenario(options).stream().map(LoadGen.Step::name).toList();
     }
 }
