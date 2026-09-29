@@ -108,13 +108,15 @@ final class Statistics {
 
         List<Interval> intervals = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            List<Sample> bucket = buckets.get(i);
-            long[] sorted = sortedResponseTimes(bucket);
-            long errors = bucket.stream().filter(sample -> !sample.ok()).count();
-            intervals.add(new Interval(i * intervalNanos, sorted.length, errors,
-                    percentile(sorted, 50), percentile(sorted, 95), max(sorted)));
+            intervals.add(interval(i * intervalNanos, buckets.get(i)));
         }
         return intervals;
+    }
+
+    static Interval interval(long startNanos, List<Sample> samples) {
+        long[] sorted = sortedResponseTimes(samples);
+        long errors = samples.stream().filter(sample -> !sample.ok()).count();
+        return new Interval(startNanos, sorted.length, errors, percentile(sorted, 50), percentile(sorted, 95), max(sorted));
     }
 
     /**

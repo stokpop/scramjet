@@ -33,7 +33,7 @@ record Options(
               --matrix-size <n>       matrixSize param for /cpu/magic-identity-check calls, default 100
               --churn-objects <n>     short-lived BigDecimals created per /memory/churn call, default 100000
               --leak-items <n>        music scores retained per /memory/grow call (~1.8 KB each), default 100
-              --report <name>         report view: ascii, default ascii
+              --report <name>         ascii (report at the end) or live (also a row per second during the run), default ascii
               --insecure              skip TLS certificate and host name verification (test environments only)
               --help                  show this help
 

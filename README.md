@@ -168,7 +168,7 @@ minutes; lower `--rate` or `--leak-items` for a slower leak. `/memory/clear` rel
 | `--matrix-size` | `100` | `matrixSize` param for `/cpu/magic-identity-check` |
 | `--churn-objects` | `100000` | Short-lived BigDecimals created per `/memory/churn` call |
 | `--leak-items` | `100` | Music scores (~1.8 KB each) retained per `/memory/grow` call |
-| `--report` | `ascii` | Report view; only `ascii` so far |
+| `--report` | `ascii` | `ascii`: report at the end; `live`: also a row per tick during the run |
 | `--insecure` | off | Skip TLS certificate and host name verification, for test environments with self-signed certificates only |
 
 At the end it reports per step the total, successes, failures, error percentage, throughput
@@ -192,9 +192,24 @@ service with `-Xmx128m`: GC trouble shows at 54 s, the service stops answering a
     63s    60  55!   3000.6   3001.3   3004.1  ########################################>
 ```
 
+With `--report live` a row is printed every second while the run is going (stretched on long
+runs to stay under about 60 rows), for the responses that completed in that tick. `flight`
+is the number of requests sent but not answered yet, so a service that stops keeping up
+shows as `done` dropping while `flight` grows, before any timeout arrives. Bars use a
+fixed log scale from 1 ms to `--timeout`. Rows are appended, not redrawn, so the output
+also works in CI logs and pipes. The full report follows at the end.
+
+```
+   time  done  err flight      p50      p95      max  1ms         10ms       100ms       1s
+    62s    40           2     76.9    124.7    126.9  ######################==
+    64s    28          14    103.1    293.1    390.5  #######################=====--
+    66s     0          54      0.0      0.0      0.0
+    68s    33  33!     61   3000.7   3001.9   3003.6  ########################################>
+```
+
 The code follows a small MVC split: `Results` is the model (samples, with listeners for
 live updates), `Statistics` does the calculations, and a `Report` implementation is the
-view. `AsciiReport` is the only view for now; a live view can implement `Report.sample`.
+view: `AsciiReport` for the end report, `LiveAsciiReport` for live rows.
 
 ## Build
 

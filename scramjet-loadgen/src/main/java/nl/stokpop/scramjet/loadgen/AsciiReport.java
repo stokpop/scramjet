@@ -105,7 +105,7 @@ final class AsciiReport implements Report {
         return text.toString();
     }
 
-    private static String bar(long p50, long p95, long max, long scale) {
+    static String bar(long p50, long p95, long max, long scale) {
         int n50 = p50 == 0 ? 0 : Math.max(1, width(p50, scale));
         int n95 = Math.max(n50, width(p95, scale));
         int nMax = Math.max(n95, Math.min(BAR_WIDTH, width(max, scale)));
@@ -126,7 +126,7 @@ final class AsciiReport implements Report {
     /**
      * Tick labels for the bar column at 1 ms, 10 ms, 100 ms, 1 s, ... up to the scale.
      */
-    private static String axis(long scale) {
+    static String axis(long scale) {
         char[] axis = " ".repeat(BAR_WIDTH + 8).toCharArray();
         int nextFree = 0;
         for (long tick = MS; tick <= scale; tick *= 10) {
@@ -141,7 +141,7 @@ final class AsciiReport implements Report {
         return new String(axis).stripTrailing();
     }
 
-    private static double millis(long nanos) {
+    static double millis(long nanos) {
         return nanos / 1e6;
     }
 }

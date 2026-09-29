@@ -8,11 +8,12 @@ import java.util.List;
  */
 interface Report {
 
-    List<String> NAMES = List.of("ascii");
+    List<String> NAMES = List.of("ascii", "live");
 
     static Report forName(String name) {
         return switch (name) {
             case "ascii" -> new AsciiReport(System.out);
+            case "live" -> new LiveAsciiReport(System.out);
             default -> throw new IllegalArgumentException("Unknown report " + name + ", choose one of " + NAMES);
         };
     }
